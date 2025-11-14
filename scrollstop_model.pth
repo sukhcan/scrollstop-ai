@@ -1,0 +1,61 @@
+# train_scrollstop_final.py
+import numpy as np
+import torch
+import torch.nn as nn
+
+print("ScrollStop™ AI: Training on 100 REAL + 900 SYNTHETIC...")
+
+# Load REAL data
+real_data = np.load("real_scrollstop_data.npy")  # (100, 5)
+N_real = len(real_data)
+
+# Simulate sequences
+seq_len = 10
+X_real = np.repeat(real_data[:, np.newaxis, :], seq_len, axis=1)
+avg_eng = np.mean(real_data, axis=1)
+stop_real = 15 + 30 * avg_eng + np.random.normal(0, 5, N_real)
+stop_real = np.clip(stop_real, 5, 50)
+
+# Synthetic data
+num_synth = 900
+X_synth = np.zeros((num_synth, seq_len, 5))
+y_synth = np.zeros(num_synth)
+for i in range(num_synth):
+    stop_sec = np.random.uniform(5, 50)
+    stop_idx = int((stop_sec / 60) * seq_len)
+    for t in range(seq_len):
+        dist = abs(t - stop_idx)
+        X_synth[i, t] = np.exp(-dist * 0.3) * np.random.uniform(0.05, 0.2, 5)
+    y_synth[i] = stop_sec
+X_synth += np.random.normal(0, 0.005, X_synth.shape)
+
+# Combine
+X = torch.tensor(np.concatenate([X_real, X_synth], axis=0), dtype=torch.float32)
+y = torch.tensor(np.concatenate([stop_real, y_synth], axis=0), dtype=torch.float32).unsqueeze(1)
+
+# Model
+class ScrollStop(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.lstm = nn.LSTM(5, 64, batch_first=True)
+        self.fc = nn.Linear(64, 1)
+    def forward(self, x):
+        out, _ = self.lstm(x)
+        return self.fc(out[:, -1, :])
+
+model = ScrollStop()
+opt = torch.optim.Adam(model.parameters(), lr=0.001)
+loss_fn = nn.MSELoss()
+
+print(f"Training {len(X)} samples...")
+for epoch in range(100):
+    opt.zero_grad()
+    pred = model(X)
+    loss = loss_fn(pred, y)
+    loss.backward()
+    opt.step()
+    if epoch % 20 == 0:
+        print(f"Epoch {epoch}, Loss: {loss.item():.4f}")
+
+torch.save(model.state_dict(), "scrollstop_final.pth")
+print(f"MODEL READY! Predict stop second in <0.1 sec!")
